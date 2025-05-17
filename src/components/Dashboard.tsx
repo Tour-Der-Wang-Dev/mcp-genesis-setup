@@ -5,6 +5,7 @@ import CommandConsole from './CommandConsole';
 import ResourceMonitor from './ResourceMonitor';
 import NetworkGraph from './NetworkGraph';
 import SecurityStatus from './SecurityStatus';
+import CommandHelpPanel from './CommandHelpPanel';
 import { Separator } from '@/components/ui/separator';
 
 const Dashboard: React.FC = () => {
@@ -28,7 +29,7 @@ const Dashboard: React.FC = () => {
           <h1 className="text-xl md:text-2xl font-bold text-mcp-accent animate-pulse-glow font-['Orbitron']">
             Modern Master Control Program
           </h1>
-          <p className="text-xs text-mcp-text-dim">v1.0.0 - Security Level: Alpha</p>
+          <p className="text-xs text-mcp-text-dim">v1.0.0 - Security Level: Alpha - Master Prompting Enabled</p>
         </div>
         
         <div className="text-right">
@@ -54,8 +55,9 @@ const Dashboard: React.FC = () => {
         <div className="lg:col-span-2">
           <CommandConsole />
         </div>
-        <div>
+        <div className="space-y-6">
           <ResourceMonitor />
+          <CommandHelpPanel />
         </div>
       </div>
       

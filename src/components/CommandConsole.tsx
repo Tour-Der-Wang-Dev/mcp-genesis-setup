@@ -4,15 +4,27 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Terminal, ArrowUp, X } from 'lucide-react';
-import { processCommand, CommandResponse } from '@/utils/mcpCommands';
+import { Terminal, ArrowUp, X, Play, Square, List } from 'lucide-react';
+import { CommandResponse } from '@/utils/mcpCommands';
+import { 
+  processEnhancedCommand, 
+  generateSuggestions,
+  CommandHistoryItem
+} from '@/utils/masterPromptingSystem';
 import { useToast } from '@/components/ui/use-toast';
+import CommandSuggestions from './CommandSuggestions';
 
 const CommandConsole: React.FC = () => {
   const [command, setCommand] = useState('');
   const [history, setHistory] = useState<CommandResponse[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
+  const [commandHistoryFull, setCommandHistoryFull] = useState<CommandHistoryItem[]>([]);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [isRecording, setIsRecording] = useState(false);
+  const [currentMacro, setCurrentMacro] = useState<string>('');
+  const [macroCommands, setMacroCommands] = useState<string[]>([]);
+  
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -30,16 +42,57 @@ const CommandConsole: React.FC = () => {
       inputRef.current.focus();
     }
   }, []);
+  
+  // Generate suggestions when command changes
+  useEffect(() => {
+    const newSuggestions = generateSuggestions(command, commandHistoryFull);
+    setSuggestions(newSuggestions);
+  }, [command, commandHistoryFull]);
 
   const handleSendCommand = () => {
     if (!command.trim()) return;
     
     const trimmedCommand = command.trim();
-    const response = processCommand(trimmedCommand);
+    const response = processEnhancedCommand(trimmedCommand, commandHistoryFull);
     
     // Add to history
     setHistory(prev => [...prev, response]);
     setCommandHistory(prev => [...prev, trimmedCommand]);
+    
+    // Add to full history with timestamp
+    setCommandHistoryFull(prev => [
+      ...prev, 
+      { 
+        command: trimmedCommand, 
+        timestamp: new Date(), 
+        response 
+      }
+    ]);
+    
+    // Handle macro recording if active
+    if (isRecording) {
+      setMacroCommands(prev => [...prev, trimmedCommand]);
+      
+      // Check if this command stops the recording
+      if (trimmedCommand.toLowerCase().startsWith('macro stop')) {
+        setIsRecording(false);
+        toast({
+          title: 'Macro Saved',
+          description: `Recorded macro "${currentMacro}" with ${macroCommands.length} commands`,
+        });
+      }
+    } else if (trimmedCommand.toLowerCase().startsWith('macro record')) {
+      // Start recording a new macro
+      const parts = trimmedCommand.split(' ');
+      const macroName = parts[2] || 'unnamed_macro';
+      setCurrentMacro(macroName);
+      setIsRecording(true);
+      setMacroCommands([]);
+      toast({
+        title: 'Recording Started',
+        description: `Now recording macro "${macroName}"`,
+      });
+    }
     
     // Show toast for important responses
     if (response.status === 'error' || response.status === 'warning') {
@@ -80,6 +133,13 @@ const CommandConsole: React.FC = () => {
     }
   };
 
+  const selectSuggestion = (suggestion: string) => {
+    setCommand(suggestion);
+    if (inputRef.current) {
+      inputRef.current.focus();
+    }
+  };
+
   const clearConsole = () => {
     setHistory([]);
     toast({
@@ -89,7 +149,7 @@ const CommandConsole: React.FC = () => {
   };
 
   const initialPrompt: CommandResponse = {
-    message: 'MCP v1.0 initialized. Type "help" for available commands.',
+    message: 'MCP v1.0 initialized with Master Prompting system. Type "help" for available commands.',
     status: 'info'
   };
 
@@ -98,11 +158,55 @@ const CommandConsole: React.FC = () => {
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center">
           <Terminal className="h-5 w-5 text-mcp-accent mr-2" />
-          <h3 className="text-sm font-semibold font-['Orbitron']">Command Console</h3>
+          <h3 className="text-sm font-semibold font-['Orbitron']">Master Command Console</h3>
+          {isRecording && (
+            <div className="flex items-center ml-3 animate-pulse">
+              <Square className="h-3 w-3 text-mcp-danger mr-1" />
+              <span className="text-xs text-mcp-danger">Recording: {currentMacro}</span>
+            </div>
+          )}
         </div>
-        <Button variant="ghost" size="icon" onClick={clearConsole} className="h-6 w-6">
-          <X className="h-4 w-4 text-mcp-text-dim hover:text-mcp-danger" />
-        </Button>
+        <div className="flex items-center space-x-1">
+          {isRecording ? (
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={() => setCommand('macro stop')} 
+              className="h-6 w-6" 
+              title="Stop recording"
+            >
+              <Square className="h-4 w-4 text-mcp-danger" />
+            </Button>
+          ) : (
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={() => setCommand('macro record new_macro')} 
+              className="h-6 w-6" 
+              title="Start recording macro"
+            >
+              <Play className="h-4 w-4 text-mcp-success" />
+            </Button>
+          )}
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            onClick={() => setCommand('macro list')} 
+            className="h-6 w-6"
+            title="List saved macros"
+          >
+            <List className="h-4 w-4 text-mcp-text-dim" />
+          </Button>
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            onClick={clearConsole} 
+            className="h-6 w-6"
+            title="Clear console"
+          >
+            <X className="h-4 w-4 text-mcp-text-dim hover:text-mcp-danger" />
+          </Button>
+        </div>
       </div>
       
       <ScrollArea 
@@ -135,33 +239,53 @@ const CommandConsole: React.FC = () => {
                   {JSON.stringify(item.data, null, 2)}
                 </pre>
               )}
+              
+              {/* Show suggestions from response if available */}
+              {item.data?.suggestions && (
+                <div className="ml-4 mt-1">
+                  <CommandSuggestions
+                    suggestions={item.data.suggestions.commands}
+                    onSelectSuggestion={selectSuggestion}
+                  />
+                </div>
+              )}
             </div>
           ))}
         </div>
       </ScrollArea>
       
-      <div className="flex gap-2">
-        <div className="relative flex-grow">
-          <Input
-            ref={inputRef}
-            value={command}
-            onChange={(e) => setCommand(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Enter command..."
-            className="bg-mcp-bg-dark border-mcp-accent border-opacity-30 text-mcp-text pr-8"
-          />
-          {historyIndex >= 0 && (
-            <span className="absolute right-2 top-1/2 transform -translate-y-1/2">
-              <ArrowUp className="h-3 w-3 text-mcp-accent-dim" />
-            </span>
-          )}
+      <div className="space-y-2">
+        <div className="flex gap-2">
+          <div className="relative flex-grow">
+            <Input
+              ref={inputRef}
+              value={command}
+              onChange={(e) => setCommand(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Enter command..."
+              className="bg-mcp-bg-dark border-mcp-accent border-opacity-30 text-mcp-text pr-8"
+            />
+            {historyIndex >= 0 && (
+              <span className="absolute right-2 top-1/2 transform -translate-y-1/2">
+                <ArrowUp className="h-3 w-3 text-mcp-accent-dim" />
+              </span>
+            )}
+          </div>
+          <Button 
+            onClick={handleSendCommand}
+            className="bg-mcp-accent hover:bg-mcp-accent-dim text-black"
+          >
+            Execute
+          </Button>
         </div>
-        <Button 
-          onClick={handleSendCommand}
-          className="bg-mcp-accent hover:bg-mcp-accent-dim text-black"
-        >
-          Execute
-        </Button>
+        
+        {/* Command suggestions */}
+        {command && suggestions.length > 0 && (
+          <CommandSuggestions
+            suggestions={suggestions}
+            onSelectSuggestion={selectSuggestion}
+          />
+        )}
       </div>
     </Card>
   );
