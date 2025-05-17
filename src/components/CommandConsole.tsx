@@ -4,12 +4,13 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Terminal, ArrowUp, X, Play, Square, List } from 'lucide-react';
+import { Terminal, ArrowUp, X, Play, Square, List, Clock } from 'lucide-react';
 import { CommandResponse } from '@/utils/mcpCommands';
 import { 
   processEnhancedCommand, 
   generateSuggestions,
-  CommandHistoryItem
+  CommandHistoryItem,
+  CommandMacro
 } from '@/utils/masterPromptingSystem';
 import { useToast } from '@/components/ui/use-toast';
 import CommandSuggestions from './CommandSuggestions';
@@ -21,9 +22,11 @@ const CommandConsole: React.FC = () => {
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
   const [commandHistoryFull, setCommandHistoryFull] = useState<CommandHistoryItem[]>([]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [recentCommands, setRecentCommands] = useState<string[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [currentMacro, setCurrentMacro] = useState<string>('');
   const [macroCommands, setMacroCommands] = useState<string[]>([]);
+  const [savedMacros, setSavedMacros] = useState<CommandMacro[]>([]);
   
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -48,6 +51,15 @@ const CommandConsole: React.FC = () => {
     const newSuggestions = generateSuggestions(command, commandHistoryFull);
     setSuggestions(newSuggestions);
   }, [command, commandHistoryFull]);
+  
+  // Update recent commands list
+  useEffect(() => {
+    if (commandHistory.length > 0) {
+      // Get unique recent commands (last 5)
+      const recent = Array.from(new Set(commandHistory.slice(-10).reverse()));
+      setRecentCommands(recent.slice(0, 5));
+    }
+  }, [commandHistory]);
 
   const handleSendCommand = () => {
     if (!command.trim()) return;
@@ -75,23 +87,20 @@ const CommandConsole: React.FC = () => {
       
       // Check if this command stops the recording
       if (trimmedCommand.toLowerCase().startsWith('macro stop')) {
-        setIsRecording(false);
-        toast({
-          title: 'Macro Saved',
-          description: `Recorded macro "${currentMacro}" with ${macroCommands.length} commands`,
-        });
+        finishMacroRecording();
       }
     } else if (trimmedCommand.toLowerCase().startsWith('macro record')) {
       // Start recording a new macro
-      const parts = trimmedCommand.split(' ');
-      const macroName = parts[2] || 'unnamed_macro';
-      setCurrentMacro(macroName);
-      setIsRecording(true);
-      setMacroCommands([]);
-      toast({
-        title: 'Recording Started',
-        description: `Now recording macro "${macroName}"`,
-      });
+      startMacroRecording(trimmedCommand);
+    } else if (trimmedCommand.toLowerCase().startsWith('macro run')) {
+      // Run a macro
+      const macroName = trimmedCommand.split(' ')[2];
+      if (macroName) {
+        const macro = savedMacros.find(m => m.name === macroName);
+        if (macro) {
+          runMacro(macro);
+        }
+      }
     }
     
     // Show toast for important responses
@@ -106,6 +115,65 @@ const CommandConsole: React.FC = () => {
     // Reset
     setCommand('');
     setHistoryIndex(-1);
+  };
+  
+  const startMacroRecording = (cmd: string) => {
+    const parts = cmd.split(' ');
+    const macroName = parts[2] || `macro_${new Date().getTime()}`;
+    setCurrentMacro(macroName);
+    setIsRecording(true);
+    setMacroCommands([]);
+    toast({
+      title: 'Recording Started',
+      description: `Now recording macro "${macroName}"`,
+    });
+  };
+  
+  const finishMacroRecording = () => {
+    // Filter out the macro stop command
+    const commands = macroCommands.filter(cmd => !cmd.toLowerCase().startsWith('macro stop'));
+    
+    if (commands.length > 0) {
+      const newMacro: CommandMacro = {
+        name: currentMacro,
+        commands: commands,
+        description: `Macro with ${commands.length} commands`
+      };
+      
+      setSavedMacros(prev => [...prev, newMacro]);
+      
+      toast({
+        title: 'Macro Saved',
+        description: `Recorded macro "${currentMacro}" with ${commands.length} commands`,
+      });
+    } else {
+      toast({
+        title: 'Empty Macro',
+        description: 'No commands were recorded for the macro',
+        variant: 'destructive'
+      });
+    }
+    
+    setIsRecording(false);
+    setCurrentMacro('');
+    setMacroCommands([]);
+  };
+  
+  const runMacro = (macro: CommandMacro) => {
+    toast({
+      title: 'Running Macro',
+      description: `Executing macro "${macro.name}" with ${macro.commands.length} commands`,
+    });
+    
+    // Execute each command with a small delay
+    macro.commands.forEach((cmd, index) => {
+      setTimeout(() => {
+        setCommand(cmd);
+        setTimeout(() => {
+          handleSendCommand();
+        }, 100);
+      }, index * 500);
+    });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -197,6 +265,15 @@ const CommandConsole: React.FC = () => {
           >
             <List className="h-4 w-4 text-mcp-text-dim" />
           </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setCommand('help')}
+            className="h-6 w-6"
+            title="Show help"
+          >
+            <HelpCircle className="h-4 w-4 text-mcp-text-dim" />
+          </Button>
           <Button 
             variant="ghost" 
             size="icon" 
@@ -279,11 +356,20 @@ const CommandConsole: React.FC = () => {
           </Button>
         </div>
         
-        {/* Command suggestions */}
+        {/* Command suggestions based on input */}
         {command && suggestions.length > 0 && (
           <CommandSuggestions
             suggestions={suggestions}
             onSelectSuggestion={selectSuggestion}
+          />
+        )}
+        
+        {/* Recent commands */}
+        {!command && recentCommands.length > 0 && (
+          <CommandSuggestions
+            suggestions={recentCommands}
+            onSelectSuggestion={selectSuggestion}
+            title="Recent commands:"
           />
         )}
       </div>
